@@ -1,0 +1,660 @@
+---
+title: "Untitled"
+author: "STA3010A G Assignment"
+date: "2025-11-27"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+## Spatial Analysis of Malaria Incidence Across Counties in Kenya
+
+```{r}
+# Load libraries
+library(tidyverse)
+library(sf)
+library(spdep)
+library(tmap)
+library(spatialreg)
+library(readxl)
+library(stringr)
+library(knitr)
+```
+
+## 1. Data Preparation & Description
+
+### **1.a. Load Data**
+
+#### **- Load The Map**
+
+```{r}
+# We use the path you provided previously
+file_path <- "C:/Users/Admin/OneDrive - United States International University (USIU)/Documents/USIU_A/FS2025/STA3010/G a 2/gadm41_KEN_1.json"
+kenya_map <- st_read(file_path)
+
+# --- 2. CLEAN NAMES ---
+# Naming consistency
+kenya_map <- kenya_map %>%
+  mutate(NAME_1 = case_when(
+    NAME_1 == "Trans Nzoia" ~ "Trans Nzoia",
+    NAME_1 == "Elgeyo-Marakwet" ~ "Elgeyo-Marakwet",
+    NAME_1 == "Tharaka-Nithi" ~ "Tharaka-Nithi",
+    NAME_1 == "HomaBay" ~ "Homa Bay",
+    NAME_1 == "TaitaTaveta" ~ "Taita Taveta",
+    NAME_1 == "TanaRiver" ~ "Tana River",
+    NAME_1 == "TransNzoia" ~ "Trans Nzoia",
+    NAME_1 == "UasinGishu" ~ "Uasin Gishu",
+    NAME_1 == "WestPokot" ~ "West Pokot",
+    NAME_1 == "Elgeyo-Marakwet" ~ "Elgeyo-Marakwet", 
+    TRUE ~ NAME_1
+  ))
+```
+
+### - Poverty **Rate Data**
+
+```{r}
+poverty_data <- data.frame(
+  County = c(
+    "Turkana", "Mandera", "Samburu", "Garissa", "Tana River", 
+    "Marsabit", "Wajir", "West Pokot", "Kitui", "Isiolo", 
+    "Kilifi", "Elgeyo-Marakwet", "Busia", "Kwale", "Bungoma", 
+    "Vihiga", "Kericho", "Bomet", "Baringo", "Migori", 
+    "Makueni", "Uasin Gishu", "Taita Taveta", "Nandi", "Kisumu", 
+    "Nyamira", "Machakos", "Siaya", "Nakuru", "Kakamega", 
+    "Laikipia", "Trans Nzoia", "Kajiado", "Tharaka-Nithi", "Lamu", 
+    "Nyandarua", "Meru", "Kisii", "Murang'a", "Homa Bay", 
+    "Mombasa", "Narok", "Nyeri", "Embu", "Kirinyaga", 
+    "Kiambu", "Nairobi"
+  ),
+  Poverty_Rate = c(
+    82.7, 72.9, 71.9, 67.8, 66.7, 
+    66.1, 64.3, 60.1, 58.3, 55.6, 
+    53.0, 53.0, 52.7, 51.1, 49.2, 
+    47.9, 47.8, 47.1, 46.9, 45.7, 
+    44.7, 39.9, 39.3, 39.1, 39.0, 
+    38.8, 38.3, 38.3, 38.2, 38.2, 
+    38.0, 37.3, 37.3, 36.1, 35.6, 
+    34.5, 34.1, 32.9, 30.1, 28.2, 
+    27.0, 26.2, 26.0, 24.3, 23.1, 
+    19.9, 16.5
+  )
+)
+
+```
+
+#### **- Load Data Population**
+
+```{r}
+
+data_pop <- read.csv("C:\\Users\\Admin\\OneDrive - United States International University (USIU)\\Documents\\USIU_A\\FS2025\\STA3010\\G a 2\\kenya-populationland-area-population-density_by_subcounty.csv")
+head(data_pop)
+
+```
+
+#### **- Data Malaria Load**
+
+```{r}
+data_malaria <-read_excel("C:\\Users\\Admin\\OneDrive - United States International University (USIU)\\Documents\\USIU_A\\FS2025\\STA3010\\G a 2\\Malaria.xlsx")
+
+head(data_malaria)
+```
+
+#### **- Simulate data of Rain Fall and Temprature based on Zones**
+
+```{r}
+# 2. Function to generate realistic data based on zone
+get_climate <- function(zone) {
+  if(zone == "Coast") {
+    return(c(runif(1, 800, 1400), runif(1, 26, 28)))      # Mod Rain, High Temp
+  } else if(zone == "Arid") {
+    return(c(runif(1, 200, 500), runif(1, 28, 31)))       # Low Rain, Very High Temp
+  } else if(zone == "Semi-Arid") {
+    return(c(runif(1, 500, 900), runif(1, 22, 26)))       # Low-Mod Rain, Warm Temp
+  } else if(zone == "Highlands") {
+    return(c(runif(1, 1000, 1800), runif(1, 16, 21)))     # High Rain, Cool Temp
+  } else { # Lake
+    return(c(runif(1, 1200, 2000), runif(1, 22, 25)))     # Very High Rain, Mod Temp
+  }
+}
+```
+
+```{r}
+data_malaria_clean <- data_malaria %>%
+  mutate(
+    Transmission = str_extract(`Transmission Zone`,
+                              "risk|Seasonal|endemic|epidemic prone"),
+    
+    Zone = str_extract(`Transmission Zone`,
+                       "Highland|Lake|lake|Low|highland|coastal|Coast|arid|semi-arid|arid, & semi-arid")
+  ) %>%
+  mutate(
+    # Capitalize properly
+    Transmission = str_to_title(Transmission),
+    Zone = str_to_title(Zone)
+  )
+
+```
+
+```{r}
+data_malaria_clean$Zone <- data_malaria_clean$Zone |>
+  trimws() |>                # remove extra spaces
+  tolower() |>               # make lower case
+  dplyr::recode(
+    "highland" = "Highlands",
+    "lake" = "Lake",
+    "coast" = "Coast",
+    "arid" = "Arid",
+    "low" = "Semi-Arid"      # choose category for 'Low'
+  ) |>
+  factor(levels = c("Coast","Arid","Semi-Arid","Highlands","Lake"))
+```
+
+```{r}
+set.seed(42)
+climate_values <- t(sapply(data_malaria_clean$Zone, get_climate))
+
+data_malaria_clean$Rainfall <- round(climate_values[,1], 1)
+data_malaria_clean$Temperature <- round(climate_values[,2], 1)
+
+```
+
+#### **- Population**
+
+```{r}
+# 1. Create the Population Dataframe (Raw Data)
+pop_data <- tibble(
+  County = c(
+    "Nairobi", "Kiambu", "Nakuru", "Kakamega", "Bungoma", "Meru", "Kilifi", 
+    "Machakos", "Kisii", "Mombasa", "Narok", "Kajiado", "Uasin Gishu", 
+    "Migori", "Kisumu", "Homa Bay", "Kitui", "Murang’a", "Trans Nzoia", 
+    "Siaya", "Turkana", "Makueni", "Mandera", "Busia", "Kwale", "Nandi", 
+    "Kericho", "Garissa", "Bomet", "Wajir", "Nyeri", "Baringo", "Nyandarua", 
+    "West Pokot", "Nyamira", "Kirinyaga", "Embu", "Vihiga ", "Laikipia", 
+    "Marsabit", "Elgeyo Marakwet", "Tharaka Nithi", "Taita Taveta", 
+    "Tana River", "Samburu", "Isiolo", "Lamu"
+  ),
+  Population= c(
+    "4,906,000", "2,754,000", "2,445,000", "2,073,000", "1,845,000", "1,666,000", "1,637,000",
+    "1,518,000", "1,370,000", "1,368,000", "1,355,000", "1,328,000", "1,307,000",
+    "1,292,000", "1,290,000", "1,278,000", "1,259,000", "1,136,000", "1,108,000",
+    "1,097,000", "1,074,000", "1,065,000", "1,007,000", "1,006,000", "988,000", "982,000",
+    "980,000", "971,000", "965,000", "915,000", "863,000", "764,000", "721,000",
+    "706,000", "665,000", "664,000", "662,000", "636,000", "583,000",
+    "539,000", "509,000", "425,000", "373,000", "370,000", "367,000", "330,000", "176,000"
+  )
+)
+# 1. Remove commas and convert to numeric
+pop_data$Population <- as.numeric(gsub(",", "", pop_data$Population))
+head(pop_data)
+```
+
+### **- Cleaning Data**
+
+-   **Naming Consistency for merge**
+-   Define the "Gold Standard" List
+
+```{r}
+# The Official 47 County Names (Matches GADM/Knbs Shapefiles)
+# Note specific spellings: "Murang'a", "Elgeyo-Marakwet", "Tharaka-Nithi"
+master_counties <- c(
+  "Baringo", "Bomet", "Bungoma", "Busia", "Elgeyo-Marakwet",
+  "Embu", "Garissa", "Homa Bay", "Isiolo", "Kajiado",
+  "Kakamega", "Kericho", "Kiambu", "Kilifi", "Kirinyaga",
+  "Kisii", "Kisumu", "Kitui", "Kwale", "Laikipia",
+  "Lamu", "Machakos", "Makueni", "Mandera", "Marsabit",
+  "Meru", "Migori", "Mombasa", "Murang'a", "Nairobi",
+  "Nakuru", "Nandi", "Narok", "Nyamira", "Nyandarua",
+  "Nyeri", "Samburu", "Siaya", "Taita Taveta", "Tana River",
+  "Tharaka-Nithi", "Trans Nzoia", "Turkana", "Uasin Gishu",
+  "Vihiga", "Wajir", "West Pokot"
+)
+```
+
+-   The Mismatch Detection
+
+```{r}
+# Function to find bad names
+check_mismatches <- function(df, col_name, dataset_name) {
+  # Get unique names from the dataset
+  current_names <- unique(df[[col_name]])
+  
+  # Find names that are NOT in the master list
+  bad_names <- setdiff(current_names, master_counties)
+  
+  if(length(bad_names) > 0) {
+    cat(paste0("Mismatches in ", dataset_name, ":\n"))
+    print(bad_names)
+  } else {
+    cat(paste0(dataset_name, " is perfect!\n"))
+  }
+}
+# Run the check on all datasets
+check_mismatches(kenya_map, "NAME_1", "Map Data")
+check_mismatches(poverty_data, "County", "Poverty Data")
+check_mismatches(data_malaria_clean, "county", "Malaria Data") # Check capitalization of 'county'
+check_mismatches(pop_data, "County", "Population Data")
+```
+
+-   The Universal Fixer
+
+```{r}
+# --- A. STANDARDIZE THE MAP (kenya_map) ---
+# 1. Rename NAME_1 to County
+# 2. Fix spelling to match the standard
+kenya_map_clean <- kenya_map %>%
+  rename(County = NAME_1) %>%  # Change column name
+  mutate(County = case_when(
+    County == "Trans-Nzoia" ~ "Trans Nzoia",
+    County == "Elgeyo Marakwet" ~ "Elgeyo-Marakwet",
+    County == "Tharaka Nithi" ~ "Tharaka-Nithi",
+    TRUE ~ County
+  ))
+
+# --- B. STANDARDIZE MALARIA DATA (data_malaria_clean) ---
+# 1. Rename 'county' (lowercase) to 'County' (Uppercase)
+# 2. Fix spelling
+data_malaria_final <- data_malaria_clean %>%
+  rename(County = County) %>%  # Change column name
+  mutate(
+    County = str_to_title(County), # Fix casing (e.g. "mombasa" -> "Mombasa")
+    County = case_when(
+      County == "Muranga" ~ "Murang'a",
+      County == "Elgeyo Marakwet" ~ "Elgeyo-Marakwet",
+      County == "Tharaka Nithi" ~ "Tharaka-Nithi",
+      TRUE ~ County
+    )
+  )
+
+# --- C. STANDARDIZE POPULATION DATA (pop_data) ---
+# 1. Column is already 'County', just fix values
+pop_data_final <- pop_data %>%
+  mutate(County = case_when(
+    County == "Murang’a" ~ "Murang'a",  # Fix curly apostrophe
+    County == "Elgeyo Marakwet" ~ "Elgeyo-Marakwet",
+    County == "Tharaka Nithi" ~ "Tharaka-Nithi",
+    County == "Vihiga " ~ "Vihiga",    # Remove space
+    TRUE ~ County
+  ))
+
+# --- D. STANDARDIZE POVERTY DATA (poverty_data) ---
+# 1. Column is already 'County', just fix values
+poverty_data_final <- poverty_data %>%
+  mutate(County = case_when(
+    County == "Homabay" ~ "Homa Bay",
+    County == "UsinGuishu" ~ "Uasin Gishu",
+    County == "West Pokcket" ~ "West Pokot",
+    County == "Muranga" ~ "Murang'a",
+    TRUE ~ County
+  ))
+
+```
+
+### 1. b. Merging Data Sets
+
+```{r}
+# --- E. THE FINAL MERGE ---
+# Now that ALL datasets have a column named "County", we can chain the joins.
+final_combined_map <- kenya_map_clean %>%
+  left_join(poverty_data_final, by = "County") %>%
+  left_join(data_malaria_final, by = "County") %>%
+  left_join(pop_data_final, by = "County")
+
+# Check if we lost any rows (Should be 47)
+print(paste("Total Counties:", nrow(final_combined_map)))
+```
+
+```{r}
+# 1. Select and Rename in one step
+final_cleaned_data <- final_combined_map %>%
+  select(
+    County, 
+    geometry,
+    Poverty_Rate = Poverty_Rate,
+    Malaria_Cases = `Malaria cases per 1000 population`, # Shortens long name
+    Transmission,
+    Zone,
+    Rainfall = Rainfall,
+    Temperature = Temperature,
+    Population = Population
+    
+  )
+```
+
+#### 1.c. Data Description
+
+-   **Variables/Column names**
+
+```{r}
+colnames(final_cleaned_data)
+```
+
+-   **Summary Statistics**
+
+```{r}
+# Print the technical structure
+glimpse(final_cleaned_data)
+```
+
+```{r}
+# We drop geometry to keep the output clean
+final_cleaned_data %>%
+  st_drop_geometry() %>%
+  select(Poverty_Rate, Malaria_Cases, Population, Rainfall, Temperature) %>%
+  summary()
+```
+
+```{r}
+is.null(final_cleaned_data)
+```
+
+-   **1.d.** **Variables Description**
+
+```{r}
+# 1. Prepare the data (Drop geometry for the table summary to avoid messy text)
+df_for_table <- final_cleaned_data %>% st_drop_geometry()
+
+# 2. AUTOMATICALLY Extract Names, Types, and Examples
+auto_table <- data.frame(
+  Variable = names(df_for_table),
+  
+  # Automatically get the Data Type (Numeric, Character, etc.)
+  Data_Type = sapply(df_for_table, function(x) class(x)[1]),
+  
+  # Automatically get a Range (for numbers) or an Example (for text)
+  Range_or_Example = sapply(df_for_table, function(x) {
+    if(is.numeric(x)) {
+      # If numeric, calculate min and max
+      paste0(min(x, na.rm=TRUE), " - ", max(x, na.rm=TRUE))
+    } else {
+      # If text, give the first example
+      paste0("e.g., ", as.character(x)[1])
+    }
+  })
+)
+
+# 3. Adding  Descriptions
+auto_table$Description <- c(
+  "Name of the County",
+  "Percentage of population below poverty line (2022)",
+  "Confirmed malaria cases per 1,000 people",
+  "Malaria transmission risk category",
+  "Ecological climate zone",
+  "Simulated average rainfall (mm)",
+  "Simulated average temperature (°C)",
+  "Projected Population for 2025"
+)
+# 5.
+geometry_row <- data.frame(
+  Variable = "geometry",
+  Data_Type = "Spatial",
+  Range_or_Example = "MULTIPOLYGON(...)",
+  Description = "Polygon data defining county borders."
+)
+
+# 2. Add it to the existing table (rbind = row bind)
+auto_table <- rbind(auto_table, geometry_row)
+
+# 4. Print the Final Table
+print(kable(auto_table, row.names = FALSE, caption = "Automated Data Description Table"))
+```
+
+### **2. Exploratory Spatial Data Analysis (ESDA)**
+
+#### **2.a1. Choropleth map of Poverity rate incidence**
+
+```{r}
+tmap_mode("view") # Interactive viewing
+
+# a) Choropleth Map
+tm_shape(final_cleaned_data) +
+  tm_polygons(
+    col = "Poverty_Rate", 
+    style = "jenks",         # "Jenks" identifies natural breaks in data
+    palette = "Reds",        # Darker red = Higher incidence
+    title = "Percentage of population below poverty line",
+    alpha = 0.8
+  ) +
+  tm_layout(title = "Percentage of population below poverty line (2022) Distribution");
+```
+
+#### **2.1a2 Produce a Choropleth Map of Incidence**
+
+```{r}
+tmap_mode("view") # Interactive viewing
+
+# a) Choropleth Map
+tm_shape(final_cleaned_data) +
+  tm_polygons(
+    col = "Malaria_Cases", 
+    style = "jenks",         # "Jenks" identifies natural breaks in data
+    palette = "Reds",        # Darker red = Higher incidence
+    title = "Malaria Incidence (per 1000)",
+    alpha = 0.8
+  ) +
+  tm_layout(title = "Spatial Distribution of Malaria Incidence");
+```
+
+#### **2.b Compute Global Moran’s I**
+
+```{r}
+library(sf)
+library(spdep)
+
+# 1. Repair the invalid geometries in your dataset
+final_cleaned_data <- st_make_valid(final_cleaned_data)
+
+# 2. Now run the neighbor function again
+nb <- poly2nb(final_cleaned_data, queen = TRUE)
+listw <- nb2listw(nb, style = "W", zero.policy = TRUE)
+
+# 3. Success message
+print("Geometry fixed and neighbors defined!")
+```
+
+```{r}
+# 2. Now run the neighbor function again
+nb <- poly2nb(final_cleaned_data, queen = TRUE)
+listw <- nb2listw(nb, style = "W", zero.policy = TRUE)
+
+# 3. Success message
+print("Geometry fixed and neighbors defined!")
+```
+
+```{r}
+# 3. Compute and Print Global Moran's I
+global_moran <- moran.test(final_cleaned_data$Malaria_Cases, listw, zero.policy = TRUE)
+print(global_moran)
+```
+
+#### **2.c. LISA Cluster Map**
+
+```{r}
+# 1. Calculate Local Moran's I for every county
+local_m <- localmoran(final_cleaned_data$Malaria_Cases, listw, zero.policy = TRUE)
+
+# 2. Prepare the data for plotting
+# We normalize the data to find High-High vs Low-Low
+scaled_var <- scale(final_cleaned_data$Malaria_Cases) %>% as.vector()
+lag_var <- lag.listw(listw, scaled_var)
+# Create a dataframe of results
+lisa_df <- data.frame(
+  County = final_cleaned_data$County,
+  P_Value = local_m[,5] # Column 5 is the significance value
+) %>%
+  mutate(
+    # Identify the specific clusters (d)
+    Cluster = case_when(
+      P_Value > 0.05 ~ "Not Significant",
+      scaled_var > 0 & lag_var > 0 ~ "High-High", # Red (Hotspot)
+      scaled_var < 0 & lag_var < 0 ~ "Low-Low",   # Blue (Coldspot)
+      scaled_var < 0 & lag_var > 0 ~ "Low-High",  # Light Blue
+      scaled_var > 0 & lag_var < 0 ~ "High-Low",  # Pink
+      TRUE ~ "Not Significant"
+    )
+  )
+
+# 3. Join back to the map
+map_lisa <- final_cleaned_data %>%
+  left_join(lisa_df, by = "County")
+
+```
+
+```{r}
+# 4. Plot the LISA Map (c)
+lisa_colors <- c("High-High" = "red",
+                 "Low-Low" = "blue", 
+                 "Low-High" = "lightblue",
+                 "High-Low" = "pink", 
+                 "Not Significant" = "#eeeeee")
+
+tmap_mode("view")
+tm_shape(map_lisa) +
+  tm_polygons(
+    col = "Cluster", 
+    palette = lisa_colors,
+    title = "LISA Clusters",
+    border.alpha = 0.5
+  ) +
+  tm_title("LISA Cluster Map: Malaria Hotspots")
+
+```
+
+#### **2.d1 Identify clusters with out Log normalization**
+
+```{r}
+# List exactly which counties are in the hotspots
+map_lisa %>%
+  st_drop_geometry() %>%
+  filter(Cluster == "High-High") %>%
+  select(County, Malaria_Cases, Cluster)
+```
+
+```{r}
+# List exactly which counties are in the hotspots
+map_lisa %>%
+  st_drop_geometry() %>%
+  filter(Cluster == "High-Low") %>%
+  select(County, Malaria_Cases, Cluster)
+```
+
+#### **2.d2  Identify clusters with Log normalization**
+
+```{r}
+#Create a Log-Transformed variable
+# We add +1 because log(0) is impossible
+final_cleaned_data$log_Malaria <- log10(final_cleaned_data$Malaria_Cases + 1)
+
+#Run LISA on the LOG variable
+local_m_log <- localmoran(final_cleaned_data$log_Malaria, listw, zero.policy = TRUE)
+
+#Classify (using the same logic, but on the new variable)
+scaled_log <- scale(final_cleaned_data$log_Malaria) %>% as.vector()
+lag_log <- lag.listw(listw, scaled_log)
+
+lisa_df_log <- data.frame(
+  County = final_cleaned_data$County,
+  P_Value = local_m_log[,5]
+) %>%
+  mutate(
+    Cluster = case_when(
+      P_Value > 0.05 ~ "Not Significant",
+      scaled_log > 0 & lag_log > 0 ~ "High-High", # Red
+      scaled_log < 0 & lag_log < 0 ~ "Low-Low",   # Blue (Now visible!)
+      TRUE ~ "Not Significant" # Ignoring outliers for simplicity
+    )
+  )
+
+# 4. Plot
+map_lisa_log <- final_cleaned_data %>% left_join(lisa_df_log, by = "County")
+
+tmap_mode("view")
+tm_shape(map_lisa_log) +
+  tm_polygons(col = "Cluster", palette = c("High-High"="red", "Low-Low"="orange", "Not Significant"="grey90")) +
+  tm_title("LISA Map (Log-Transformed)")
+```
+
+```{r}
+map_lisa_log %>%
+  st_drop_geometry() %>%
+  filter(Cluster == "Low-Low") %>%
+  select(County, Malaria_Cases, Cluster)
+```
+
+###  3. Spatial Regression Modeling
+
+-   **Preparation: Fix Geometry & Create Weights**
+
+```{r}
+final_cleaned_data <- st_make_valid(final_cleaned_data)
+
+#Define Neighbors (Queen Contiguity)
+# If this still fails, run: sf_use_s2(FALSE) before this line
+nb <- poly2nb(final_cleaned_data, queen = TRUE)
+
+#Create Spatial Weights Matrix
+# style="W" means row-standardized (average of neighbors)
+listw <- nb2listw(nb, style = "W", zero.policy = TRUE)
+```
+
+#### 3(a): Fit Non-Spatial Regression (OLS)
+
+```{r}
+# 1. Fit Standard OLS Model
+# We assume Malaria is driven by Rain, Temp, and Poverty
+model_ols <- lm(Malaria_Cases ~ Rainfall + Temperature + Poverty_Rate, 
+                data = final_cleaned_data)
+```
+
+#### 3(b): Run Moran’s I for Residuals
+
+```{r}
+# View OLS Results
+summary(model_ols)
+
+#  Test for Spatial Autocorrelation in Residuals (Moran's I)
+lm.morantest(model_ols, listw, zero.policy = TRUE)
+```
+
+-   **Diagnostics: Choose SLM or SEM**
+
+```{r}
+# Run the full set of LM tests (Standard and Robust)
+lm_tests <- lm.LMtests(model_ols, listw, test=c("LMerr", "LMlag", "RLMerr", "RLMlag"), zero.policy = TRUE)
+
+# Print the results
+print(lm_tests)
+```
+
+#### 3(c): Fit Spatial Models
+
+```{r}
+library(spatialreg)
+
+# Fit the Spatial Lag Model (The "Favorite")
+model_slm <- lagsarlm(Malaria_Cases ~ Rainfall + Temperature + Poverty_Rate, 
+                      data = final_cleaned_data, 
+                      listw = listw, 
+                      zero.policy = TRUE)
+
+# Fit the Spatial Error Model (The "Underdog")
+model_sem <- errorsarlm(Malaria_Cases ~ Rainfall + Temperature + Poverty_Rate, 
+                        data = final_cleaned_data, 
+                        listw = listw, 
+                        zero.policy = TRUE)
+
+
+
+```
+
+#### 3(d): Compare Model Performance
+
+```{r}
+# Compare Model Performance (AIC)
+# The lowest number wins
+AIC_values <- AIC(model_ols, model_slm, model_sem)
+print(AIC_values)
+
+# 4. View the summary of the winner (likely SLM)
+summary(model_slm)
+```
