@@ -92,19 +92,15 @@ Lowest AIC = **475.67**
 ```
 spatial-malaria-kenya/
 │
-├── data/
-│   ├── Kenya_County_Data_2025.shp      # Cleaned spatial dataset
-│   └── raw_data/                       # Raw CSVs & shapefiles
-│
+├── data
+│                       
 ├── maps/
 │   ├── choropleth_incidence.png        # Incidence map
 │   └── lisa_cluster_map.png            # LISA hotspot–coldspot map
 │
-├── scripts/
-│   └── Malaria_Analysis.R              # Main analysis script
+├── Malaria_Analysis.R # Main analysis script**              
 │
-├── output/
-│   └── Model_Summary.txt               # Spatial regression results
+├── report # Spatial regression result          s
 │
 └── README.md
 ```
