@@ -134,17 +134,6 @@ spatial-malaria-kenya/
    * Fit spatial regression models
 
 ---
-
-## 👥 Contributors
-
-| Name             | Role                         |
-| ---------------- | ---------------------------- |
-| *[Student Name]* | Data Cleaning                |
-| *[Student Name]* | ESDA & Mapping               |
-| *[Student Name]* | Spatial Regression           |
-| *[Student Name]* | Statistical Interpretation   |
-| *[Student Name]* | Final Report & Documentation |
-
 **Course:** STA 3010 – Statistical Modeling
 **Institution:** United States International University–Africa (USIU-A)
 
