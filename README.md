@@ -38,6 +38,19 @@ The findings show that malaria in Kenya is a **spatially dependent phenomenon**,
 | **Demographics**       | KNBS Projections (2025)     | Population totals per county            |
 
 ---
+Link to data Sources : 
+- **Geo Data Soure**
+
+https://gadm.org/download_country.html#google_vignette
+- **Kenya Poverty Index by Sub counties**
+
+https://statskenya.co.ke/at-stats-kenya/about/overall-poverty-rates-in-kenya-by-county/62/
+statskenya.co.ke
+https://www.facebook.com/share/p/1APhVRMhp5/
+Kenyans.co.ke
+
+- **Kenya Population**
+https://statskenya.co.ke/at-stats-kenya/about/population-of-kenya-2025-population-by-county/110/
 
 ## **🛠️ Methodology & R Packages**
 
